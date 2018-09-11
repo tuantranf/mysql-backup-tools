@@ -1,39 +1,64 @@
-# mysql-backup-guideline
+#!/bin/bash
+# Shell script to backup MySQL database
 
-How to backup & restore MySQL database
+# Set these variables
+MyUSER=""	# DB_USERNAME
+MyPASS=""	# DB_PASSWORD
+MyHOST=""	# DB_HOSTNAME
 
-## Backup script
-backupmysql.sh
-```bash
-#!/bin/sh
+# Backup Dest directory
+DEST="" # /home/username/backups/DB
 
-# backup period（days）
-period=3
+# Email for notifications
+EMAIL=""
 
-# backup directory
-dirpath='/backup'
+# How many days old files must be to be removed
+DAYS=3
 
-# file name with datetime
-filename=`date +%y%m%d`
+# Linux bin paths
+MYSQL="$(which mysql)"
+MYSQLDUMP="$(which mysqldump)"
+GZIP="$(which gzip)"
 
-# Mysqldump command
-mysqldump -u[USER_NAME] -p[PASSWORD] -h[HOST] [DATABASE_NAME] > $dirpath/$filename.sql
+# Get date in dd-mm-yyyy format
+NOW="$(date +"%d-%m-%Y_%s")"
 
-# Permission
-chmod 700 $dirpath/$filename.sql
+# Create Backup sub-directories
+MBD="$DEST/$NOW/mysql"
+install -d $MBD
 
-# Remove old file
-# Remove after backup period days
-oldfile=`date --date "$period days ago" +%y%m%d`
-rm -f $dirpath/$oldfile.sql
-```
+# DB skip list
+SKIP="information_schema
+another_one_db"
 
-## Crontab
+# Get all databases
+DBS="$($MYSQL -h $MyHOST -u $MyUSER -p$MyPASS -Bse 'show databases')"
 
-Configure a crontab to run backup script
+# Archive database dumps
+for db in $DBS
+do
+    skipdb=-1
+    if [ "$SKIP" != "" ];
+    then
+		for i in $SKIP
+		do
+			[ "$db" == "$i" ] && skipdb=1 || :
+		done
+    fi
+ 
+    if [ "$skipdb" == "-1" ] ; then
+    	FILE="$MBD/$db.sql"
+	$MYSQLDUMP -h $MyHOST -u $MyUSER -p$MyPASS $db > $FILE
+    fi
+done
 
-```bash
-http://www.server-memo.net/tips/crontab.html
+# Archive the directory, send mail and cleanup
+cd $DEST
+tar -cf $NOW.tar $NOW
+$GZIP -9 $NOW.tar
 
-echo "0 3 * * * root /backupmysql.sh" > /etc/cron.d/backupmysql
-```
+echo "MySQL backup is completed! Backup name is $NOW.tar.gz" | mail -s "MySQL backup" $EMAIL
+rm -rf $NOW
+
+# Remove old files
+find $DEST -mtime +$DAYS -exec rm -f {} \;
